@@ -1,117 +1,139 @@
 from pygame import *
-import socket
-import json
+import socket, json
 from threading import Thread
 
-# ---ПУГАМЕ НАЛАШТУВАННЯ ---
-WIDTH, HEIGHT = 800, 600
+# розміри екрана
+W, H = 800, 600
 init()
-screen = display.set_mode((WIDTH, HEIGHT))
+mixer.init()
+scr = display.set_mode((W, H))
 clock = time.Clock()
 display.set_caption("Пінг-Понг")
-# ---СЕРВЕР ---
-def connect_to_server():
+
+# картинки
+ball = image.load("png-transparent-tennis-balls-tennis-game-grass-cartoon.png")
+ball = transform.scale(ball, (40, 40)) # м'яч трошки менший
+
+p1_img = image.load("jj.png.png")  # синя
+p1_img = transform.scale(p1_img, (20, 100))
+
+p2_img = image.load("gg2.png") # біла
+p2_img = transform.scale(p2_img, (20, 100))
+
+# конект до сервака
+def connect():
     while True:
         try:
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect(('localhost', 8080)) # ---- Підключення до сервера
-            buffer = ""
-            game_state = {}
-            my_id = int(client.recv(24).decode())
-            return my_id, game_state, buffer, client
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(('localhost', 8080))
+            buf = ""
+            gs = {}
+            my_id = int(s.recv(24).decode())
+            return my_id, gs, buf, s
         except:
             pass
 
-
-def receive():
-    global buffer, game_state, game_over
+def recv():
+    global buf, gs, game_over
     while not game_over:
         try:
-            data = client.recv(1024).decode()
-            buffer += data
-            while "\n" in buffer:
-                packet, buffer = buffer.split("\n", 1)
-                if packet.strip():
-                    game_state = json.loads(packet)
+            d = client.recv(1024).decode()
+            buf += d
+            while "\n" in buf:
+                pkt, buf = buf.split("\n", 1)
+                if pkt.strip():
+                    gs = json.loads(pkt)
         except:
-            game_state["winner"] = -1
+            gs["winner"] = -1
             break
 
-# --- ШРИФТИ ---
-font_win = font.Font(None, 72)
-font_main = font.Font(None, 36)
-# --- ЗОБРАЖЕННЯ ----
+# шрифт
+f_win = font.Font("Edu_NSW_ACT_Cursive\\EduNSWACTCursive-VariableFont_wght.ttf", 72)
+f_main = font.Font("Edu_NSW_ACT_Cursive\\EduNSWACTCursive-VariableFont_wght.ttf", 36)
 
-# --- ЗВУКИ ---
+# фон і звуки
+bg = image.load("reg.png")
+bg = transform.scale(bg, (W, H))
+snd_wall = mixer.Sound("power-punch-192118.mp3")
 
-# --- ГРА ---
+# змінні
 game_over = False
-winner = None
-you_winner = None
-my_id, game_state, buffer, client = connect_to_server()
-Thread(target=receive, daemon=True).start()
+you_win = None
+my_id, gs, buf, client = connect()
+Thread(target=recv, daemon=True).start()
+
 while True:
     for e in event.get():
         if e.type == QUIT:
             exit()
 
-    if "countdown" in game_state and game_state["countdown"] > 0:
-        screen.fill((0, 0, 0))
-        countdown_text = font.Font(None, 72).render(str(game_state["countdown"]), True, (255, 255, 255))
-        screen.blit(countdown_text, (WIDTH // 2 - 20, HEIGHT // 2 - 30))
+    # відлік перед стартом
+    if "countdown" in gs and gs["countdown"] > 0:
+        scr.fill((0, 0, 0))
+        t = font.Font(None, 72).render(str(gs["countdown"]), True, (255, 255, 255))
+        scr.blit(t, (W // 2 - 20, H // 2 - 30))
         display.update()
-        continue  # Не малюємо гру до завершення відліку
+        continue
 
-    if "winner" in game_state and game_state["winner"] is not None:
-        screen.fill((20, 20, 20))
+    # якщо хтось виграв
+    if "winner" in gs and gs["winner"] is not None:
+        scr.fill((20, 20, 20))
+        if you_win is None:
+            you_win = (gs["winner"] == my_id)
 
-        if you_winner is None:  # Встановлюємо тільки один раз
-            if game_state["winner"] == my_id:
-                you_winner = True
-            else:
-                you_winner = False
+        msg = "You win!" if you_win else "Better luck next time!"
+        t = f_win.render(msg, True, (255, 215, 0))
+        scr.blit(t, t.get_rect(center=(W // 2, H // 2)))
+        display.update()
+        continue
 
-        if you_winner:
-            text = "Ти переміг!"
+    # сама гра
+    if gs:
+        scr.blit(bg, (0, 0))
+
+        # малюю ракетки
+        scr.blit(p1_img, (20, gs['paddles']['0']))
+        scr.blit(p2_img, (W - 40, gs['paddles']['1']))
+
+        # м'яч
+        scr.blit(ball, (gs['ball']['x'], gs['ball']['y']))
+
+        # верхня панель
+        draw.rect(scr, (40, 40, 40), (0, 0, W, 40))
+        st = f_main.render(f"Player: {my_id + 1}", True, (255, 255, 255))
+        scr.blit(st, (10, 10))
+
+        # надпис YOU
+        if my_id == 0:
+            lbl = f_main.render("YOU", True, (0, 180, 255))
+            scr.blit(lbl, (20, gs['paddles']['0'] + 40))
         else:
-            text = "Пощастить наступним разом!"
+            lbl = f_main.render("YOU", True, (255, 100, 0))
+            scr.blit(lbl, (W - 70, gs['paddles']['1'] + 40))
 
-        win_text = font_win.render(text, True, (255, 215, 0))
-        text_rect = win_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
-        screen.blit(win_text, text_rect)
+        
+        draw.rect(scr, (180, 180, 180), (0, 40, W, H - 40), 4)
 
-        text = font_win.render('К - рестарт', True, (255, 215, 0))
-        text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 120))
-        screen.blit(text, text_rect)
+        # рахунок
+        score_t = f_main.render(f"{gs['scores'][0]} : {gs['scores'][1]}", True, (255, 255, 255))
+        scr.blit(score_t, (W // 2 - 25, 10))
 
-        display.update()
-        continue  # Блокує гру після перемоги
-
-    if game_state:
-        screen.fill((30, 30, 30))
-        draw.rect(screen, (0, 255, 0), (20, game_state['paddles']['0'], 20, 100))
-        draw.rect(screen, (255, 0, 255), (WIDTH - 40, game_state['paddles']['1'], 20, 100))
-        draw.circle(screen, (255, 255, 255), (game_state['ball']['x'], game_state['ball']['y']), 10)
-        score_text = font_main.render(f"{game_state['scores'][0]} : {game_state['scores'][1]}", True, (255, 255, 255))
-        screen.blit(score_text, (WIDTH // 2 -25, 20))
-
-        if game_state['sound_event']:
-            if game_state['sound_event'] == 'wall_hit':
-                # звук відбиття м'ячика від стін
-                pass
-            if game_state['sound_event'] == 'platform_hit':
-                # звук відбиття м'ячика від платформи
-                pass
+        
+        if gs['sound_event']:
+            if gs['sound_event'] == 'wall_hit':
+                snd_wall.play()
 
     else:
-        wating_text = font_main.render(f"Очікування гравців...", True, (255, 255, 255))
-        screen.blit(wating_text, (WIDTH // 2 - 25, 20))
+        wait_t = f_main.render(f"Waiting players", True, (255, 255, 255))
+        scr.blit(wait_t, (W // 2 - 100, 20))
 
     display.update()
     clock.tick(60)
 
+    # керування
     keys = key.get_pressed()
     if keys[K_w]:
         client.send(b"UP")
     elif keys[K_s]:
         client.send(b"DOWN")
+
